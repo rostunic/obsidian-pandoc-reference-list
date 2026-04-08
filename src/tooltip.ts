@@ -32,6 +32,27 @@ export class TooltipManager {
 
     const keys = el.dataset.citekey.split('|');
 
+    const pdfLinkOverride = (() => {
+      if (el.dataset.pwcPdfLink) {
+        return el.dataset.pwcPdfLink;
+      }
+
+      const a = el.closest('a');
+      if (!a) return null;
+      const dataHref = a.getAttribute('data-href')?.trim();
+      const href = a.getAttribute('href')?.trim();
+      const best = href && href.includes('#') ? href : dataHref || href;
+      if (!best) return null;
+      const trimmed = best.trim();
+      const noParams = trimmed.split(/[?#]/)[0];
+      if (!noParams.toLowerCase().endsWith('.pdf')) return null;
+      try {
+        return decodeURI(trimmed);
+      } catch {
+        return trimmed;
+      }
+    })();
+
     let content: DocumentFragment | HTMLElement = null;
 
     if (el.dataset.noteIndex) {
@@ -45,7 +66,8 @@ export class TooltipManager {
       for (const key of keys) {
         const html = this.plugin.bibManager.getBibForCiteKey(
           file as TFile,
-          key
+          key,
+          pdfLinkOverride
         ) as HTMLElement;
 
         if (html) {
@@ -67,6 +89,7 @@ export class TooltipManager {
     const tooltip = (this.tooltip = el.doc.body.createDiv({
       cls: `pwc-tooltip${modClasses}`,
     }));
+
     const rect = el.getBoundingClientRect();
 
     if (rect.x === 0 && rect.y === 0) {

@@ -92,6 +92,21 @@ class CiteWidget extends WidgetType {
       'data-source': this.sourcePath,
     };
 
+    // If this citation originated inside a markdown link to a PDF, preserve the
+    // destination so the tooltip can use it and clicking follows the PDF link.
+    if (this.linkText) {
+      const noParams = this.linkText.trim().split(/[?#]/)[0];
+      if (noParams.toLowerCase().endsWith('.pdf')) {
+        let decoded = this.linkText;
+        try {
+          decoded = decodeURI(decoded);
+        } catch {
+          // ignore
+        }
+        attr['data-pwc-pdf-link'] = decoded;
+      }
+    }
+
     if (this.cite.note) {
       attr['data-note-index'] = this.cite.noteIndex.toString();
     }
@@ -107,11 +122,16 @@ class CiteWidget extends WidgetType {
           span.addEventListener('click', (evt) => {
             const newPane = Keymap.isModEvent(evt);
             activeWindow.setTimeout(() => {
-              app.workspace.openLinkText(
-                this.linkText,
-                this.sourcePath,
-                newPane
-              );
+              let linkText = this.linkText;
+              const noParams = linkText.trim().split(/[?#]/)[0];
+              if (noParams.toLowerCase().endsWith('.pdf')) {
+                try {
+                  linkText = decodeURI(linkText);
+                } catch {
+                  // ignore
+                }
+              }
+              app.workspace.openLinkText(linkText, this.sourcePath, newPane);
             }, 100);
           });
         }
@@ -186,6 +206,50 @@ export const citeKeyPlugin = ViewPlugin.fromClass(
 
       const matched = new Set<RenderedCitation>();
 
+      const extractMarkdownLinkTarget = (str: string, openParenIndex: number) => {
+        if (str[openParenIndex] !== '(') return null;
+
+        let i = openParenIndex + 1;
+        while (i < str.length && /\s/.test(str[i])) i++;
+        if (i >= str.length) return null;
+
+        // <...> form
+        if (str[i] === '<') {
+          i++;
+          const start = i;
+          while (i < str.length && str[i] !== '>') i++;
+          if (i >= str.length) return null;
+          const target = str.slice(start, i).trim();
+          return target || null;
+        }
+
+        const start = i;
+        let depth = 0;
+        while (i < str.length) {
+          const c = str[i];
+          if (c === '\\') {
+            i += 2;
+            continue;
+          }
+          if (c === '(') {
+            depth++;
+            i++;
+            continue;
+          }
+          if (c === ')') {
+            if (depth === 0) break;
+            depth--;
+            i++;
+            continue;
+          }
+          if (depth === 0 && /\s/.test(c)) break;
+          i++;
+        }
+
+        const target = str.slice(start, i).trim();
+        return target || null;
+      };
+
       for (const { from, to } of view.visibleRanges) {
         const range = view.state.sliceDoc(from, to);
         const segments = getCitationSegments(
@@ -221,6 +285,24 @@ export const citeKeyPlugin = ViewPlugin.fromClass(
                   ?.includes('hmd-internal-link')
               ) {
                 linkText = view.state.sliceDoc(centerNode.from, centerNode.to);
+              }
+
+              // Markdown links: [@key](path/to/file.pdf#page=...)
+              if (!linkText) {
+                const matchEndGlobal = from + match[match.length - 1].to;
+                if (view.state.sliceDoc(matchEndGlobal, matchEndGlobal + 1) === '(') {
+                  const tail = view.state.sliceDoc(
+                    matchEndGlobal,
+                    Math.min(matchEndGlobal + 2000, view.state.doc.length)
+                  );
+                  const target = extractMarkdownLinkTarget(tail, 0);
+                  if (target) {
+                    const noParams = target.split(/[?#]/)[0];
+                    if (noParams.toLowerCase().endsWith('.pdf')) {
+                      linkText = target;
+                    }
+                  }
+                }
               }
 
               if (

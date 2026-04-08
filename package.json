@@ -30,8 +30,8 @@
     "@types/node": "16.11.6",
     "@types/react-dom": "18.2.6",
     "@types/which": "2.0.1",
-    "@typescript-eslint/eslint-plugin": "5.2.0",
-    "@typescript-eslint/parser": "5.2.0",
+    "@typescript-eslint/eslint-plugin": "6.21.0",
+    "@typescript-eslint/parser": "6.21.0",
     "babel-jest": "27.5.1",
     "builtin-modules": "3.2.0",
     "cross-env": "7.0.3",
@@ -40,7 +40,7 @@
     "jest": "27.5.1",
     "obsidian": "1.2.8",
     "tslib": "2.3.1",
-    "typescript": "4.4.4",
+    "typescript": "5.4.5",
     "xml-js": "1.6.11"
   },
   "dependencies": {
