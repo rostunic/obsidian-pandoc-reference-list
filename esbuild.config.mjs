@@ -45,7 +45,7 @@ esbuild
       ...builtins,
     ],
     format: 'cjs',
-    watch: !prod,
+    // watch: !prod, // Removed: 'watch' is not a valid option in esbuild 0.28+
     target: 'es2016',
     logLevel: 'info',
     sourcemap: prod ? false : 'inline',

@@ -23,7 +23,7 @@ import {
   getCitations,
 } from 'src/parser/parser';
 import LRUCache from 'lru-cache';
-import { Keymap, MarkdownView, TFile, setIcon } from 'obsidian';
+import { Keymap, MarkdownView, Notice, TFile, setIcon } from 'obsidian';
 import { cite } from 'src/parser/citeproc';
 import { setCiteKeyCache } from 'src/editorExtension';
 import equal from 'fast-deep-equal';
@@ -838,6 +838,22 @@ export class BibManager {
       if (e.dataset.citekey) {
         const zLink = this.zCitekeyToLinks.get(e.dataset.citekey);
         const zPDFLinks = this.zCitekeyToPDFLinks.get(e.dataset.citekey);
+
+        const citePdfLink = (() => {
+          const anchors = Array.from(e.querySelectorAll('a'));
+          for (const a of anchors) {
+            const href = a.getAttribute('data-href') || a.getAttribute('href');
+            if (!href) continue;
+            const trimmed = href.trim();
+            const noParams = trimmed.split(/[?#]/)[0];
+            if (noParams.toLowerCase().endsWith('.pdf')) {
+              return trimmed;
+            }
+          }
+          return null;
+        })();
+
+        const pdfLinks = citePdfLink ? [citePdfLink] : zPDFLinks;
         let linkText = '@' + e.dataset.citekey;
         let linkDest = app.metadataCache.getFirstLinkpathDest(
           linkText,
@@ -851,7 +867,7 @@ export class BibManager {
           );
         }
 
-        if (!linkDest && !zLink && !zPDFLinks) return;
+        if (!linkDest && !zLink && !pdfLinks?.length) return;
 
         div.createDiv({ cls: 'pwc-entry-btns' }, (div) => {
           if (linkDest) {
@@ -873,13 +889,69 @@ export class BibManager {
               });
             });
           }
-          if (zPDFLinks) {
-            zPDFLinks.forEach((link) => {
+          if (pdfLinks?.length) {
+            pdfLinks.forEach((link) => {
+              const linkHashIndex = link.indexOf('#');
+              const linkHash = linkHashIndex === -1 ? '' : link.slice(linkHashIndex);
+              const linkNoHash = linkHashIndex === -1 ? link : link.slice(0, linkHashIndex);
+              const linkLabel = path.parse(linkNoHash).base;
+
+              // External open button (existing behavior)
               div.createDiv('clickable-icon', (div) => {
                 setIcon(div, 'lucide-file-text');
-                div.setAttr('aria-label', path.parse(link).base);
+                div.setAttr('aria-label', t('Open PDF externally') + ': ' + linkLabel);
                 div.onClickEvent(() => {
-                  activeWindow.open(`file://${encodeURI(link)}`, '_blank');
+                  const vaultRoot = (app.vault.adapter as any).getBasePath?.() || '';
+                  const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(linkNoHash);
+
+                  if (scheme) {
+                    activeWindow.open(link, '_blank');
+                    return;
+                  }
+
+                  let targetPath = linkNoHash;
+                  if (!path.isAbsolute(targetPath) && vaultRoot) {
+                    targetPath = path.join(vaultRoot, targetPath);
+                  }
+
+                  activeWindow.open(`file://${encodeURI(targetPath)}${linkHash}`, '_blank');
+                });
+              });
+              // New: Open PDF in Obsidian tab
+              div.createDiv('clickable-icon', (div) => {
+                setIcon(div, 'lucide-book-open');
+                div.setAttr('aria-label', t('Open PDF in Obsidian tab') + ': ' + linkLabel);
+                div.onClickEvent(async () => {
+                  const vaultRoot = (app.vault.adapter as any).getBasePath?.() || '';
+
+                  // Prefer opening via link text so #page=... is preserved.
+                  // First, try treating the link as a vault-relative path.
+                  let vaultPath = linkNoHash;
+
+                  // If absolute and inside the vault root, strip the vault root.
+                  if (vaultRoot && vaultPath.startsWith(vaultRoot)) {
+                    vaultPath = vaultPath.slice(vaultRoot.length);
+                  }
+
+                  // Strip leading separators and normalize to Obsidian's forward-slash paths.
+                  vaultPath = vaultPath.replace(/^[\\/]+/, '').replace(/\\/g, '/');
+
+                  let tfile = app.vault.getAbstractFileByPath(vaultPath);
+
+                  if (!(tfile instanceof TFile)) {
+                    // Try just the filename (last resort)
+                    const files = app.vault.getFiles();
+                    tfile = files.find((f) => f.name === linkLabel && f.extension === 'pdf');
+                  }
+
+                  if (tfile instanceof TFile) {
+                    await app.workspace.openLinkText(
+                      `${tfile.path}${linkHash}`,
+                      file.path
+                    );
+                  } else {
+                    new Notice(t('PDF not found in vault: ') + linkLabel);
+                  }
                 });
               });
             });

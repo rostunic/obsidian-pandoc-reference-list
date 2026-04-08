@@ -82,4 +82,9 @@ export default {
   // src/view.ts
   'Open literature note': 'Open literature note',
   'Open in Zotero': 'Open in Zotero',
+
+  // src/bib/bibManager.ts
+  'Open PDF externally': 'Open PDF externally',
+  'Open PDF in Obsidian tab': 'Open PDF in Obsidian tab',
+  'PDF not found in vault: ': 'PDF not found in vault: ',
 };

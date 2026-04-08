@@ -19,7 +19,7 @@ import ro from './locale/ro';
 import ru from './locale/ru';
 import sq from './locale/sq';
 import tr from './locale/tr';
-import uk from './locale/tr';
+import uk from './locale/uk';
 import zhCN from './locale/zh-cn';
 import zhTW from './locale/zh-tw';
 
