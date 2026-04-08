@@ -9,6 +9,7 @@ export class TooltipManager {
   tooltip: HTMLDivElement;
   isHoveringTooltip = false;
   isScrollBound = false;
+  activeEditorKey: string = null;
 
   constructor(plugin: ReferenceList) {
     this.plugin = plugin;
@@ -154,6 +155,7 @@ export class TooltipManager {
   hideTooltip() {
     this.isHoveringTooltip = false;
     this.isScrollBound = false;
+    this.activeEditorKey = null;
     this.tooltip?.win.removeEventListener('scroll', this.boundScroll);
     this.tooltip?.remove();
     this.tooltip = null;
@@ -211,14 +213,13 @@ export class TooltipManager {
     let dbOverTimer = 0;
     let dbOutTimer = 0;
     let isClosing = false;
-    let activeKey: string;
 
     return {
       scroll: (evt: UIEvent) => {
-        if (activeKey) {
+        if (this.activeEditorKey) {
           evt.view?.clearTimeout(dbOutTimer);
           evt.view?.clearTimeout(dbOverTimer);
-          activeKey = null;
+          this.activeEditorKey = null;
         }
       },
       pointerover: (evt: PointerEvent) => {
@@ -228,22 +229,22 @@ export class TooltipManager {
           if (citekey) {
             evt.view.clearTimeout(dbOutTimer);
             isClosing = false;
-            if (citekey !== activeKey) {
-              if (activeKey) {
+            if (citekey !== this.activeEditorKey) {
+              if (this.activeEditorKey) {
                 this.hideTooltip();
-                activeKey = null;
+                this.activeEditorKey = null;
               }
               evt.view.clearTimeout(dbOverTimer);
               dbOverTimer = evt.view.setTimeout(() => {
                 this.showTooltip(target);
-                activeKey = citekey;
+                this.activeEditorKey = citekey;
               }, this.plugin.settings.tooltipDelay);
             }
             return;
           }
         }
         evt.view.clearTimeout(dbOverTimer);
-        if (activeKey && !isClosing) {
+        if (this.activeEditorKey && !isClosing) {
           if (!this.tooltip) return;
           isClosing = true;
           dbOutTimer = evt.view.setTimeout(() => {
@@ -251,7 +252,7 @@ export class TooltipManager {
               isClosing = false;
             } else {
               this.hideTooltip();
-              activeKey = null;
+              this.activeEditorKey = null;
               isClosing = false;
             }
           }, 150);
