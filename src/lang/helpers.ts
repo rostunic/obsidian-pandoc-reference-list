@@ -58,5 +58,5 @@ export function t(str: keyof typeof en): string {
     console.error('Error: locale not found', lang);
   }
 
-  return (locale && locale[str]) || en[str];
+  return (locale && locale[str]) || en[str] || (str as unknown as string);
 }

@@ -2,6 +2,7 @@ import {
   Events,
   MarkdownView,
   Menu,
+  Notice,
   Plugin,
   WorkspaceLeaf,
   debounce,
@@ -101,6 +102,39 @@ export default class ReferenceList extends Plugin {
       name: t('Show reference list'),
       callback: async () => {
         this.initLeaf();
+      },
+    });
+
+    this.addCommand({
+      id: 'refresh-zotero-data',
+      name: t('Refresh Zotero data'),
+      callback: async () => {
+        await this.initPromise.promise;
+        await this.bibManager.initPromise.promise;
+
+        if (!this.settings.pullFromZotero) {
+          new Notice(t('Zotero sync is disabled in settings.'));
+          return;
+        }
+
+        if (!(await isZoteroRunning(this.settings.zoteroPort))) {
+          new Notice(t('Cannot connect to Zotero'));
+          return;
+        }
+
+        this.setStatusBarLoading();
+        try {
+          // Force a full reload from Zotero (no cache), then apply incremental refresh.
+          await this.bibManager.loadGlobalZBib(false);
+          await this.bibManager.refreshGlobalZBib();
+          this.processReferences();
+          new Notice(t('Zotero data refreshed.'));
+        } catch (e) {
+          console.error(e);
+          new Notice(t('Failed to refresh Zotero data.'));
+        } finally {
+          this.setStatusBarIdle();
+        }
       },
     });
 

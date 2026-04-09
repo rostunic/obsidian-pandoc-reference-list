@@ -78,6 +78,11 @@ export default {
 
   // src/main.ts
   'Show reference list': 'Show reference list',
+  'Refresh Zotero data': 'Refresh Zotero data',
+  'Zotero sync is disabled in settings.':
+    'Zotero sync is disabled in settings.',
+  'Zotero data refreshed.': 'Zotero data refreshed.',
+  'Failed to refresh Zotero data.': 'Failed to refresh Zotero data.',
 
   // src/view.ts
   'Open literature note': 'Open literature note',
