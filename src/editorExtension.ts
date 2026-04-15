@@ -92,18 +92,28 @@ class CiteWidget extends WidgetType {
       'data-source': this.sourcePath,
     };
 
-    // If this citation originated inside a markdown link to a PDF, preserve the
-    // destination so the tooltip can use it and clicking follows the PDF link.
+    // If this citation originated inside a markdown link, preserve the destination
+    // so the tooltip can use it and clicking follows the link.
     if (this.linkText) {
-      const noParams = this.linkText.trim().split(/[?#]/)[0];
+      const trimmed = this.linkText.trim();
+      const noParams = trimmed.split(/[?#]/)[0];
+
       if (noParams.toLowerCase().endsWith('.pdf')) {
-        let decoded = this.linkText;
+        let decoded = trimmed;
         try {
           decoded = decodeURI(decoded);
         } catch {
           // ignore
         }
         attr['data-pwc-pdf-link'] = decoded;
+      }
+
+      if (noParams.toLowerCase().endsWith('.md')) {
+        attr['data-pwc-md-link'] = trimmed;
+        const m = /#\^([^?#\s]+)/.exec(trimmed);
+        if (m?.[1]) {
+          attr['data-pwc-block-id'] = m[1];
+        }
       }
     }
 
@@ -298,7 +308,10 @@ export const citeKeyPlugin = ViewPlugin.fromClass(
                   const target = extractMarkdownLinkTarget(tail, 0);
                   if (target) {
                     const noParams = target.split(/[?#]/)[0];
-                    if (noParams.toLowerCase().endsWith('.pdf')) {
+                    if (
+                      noParams.toLowerCase().endsWith('.pdf') ||
+                      noParams.toLowerCase().endsWith('.md')
+                    ) {
                       linkText = target;
                     }
                   }

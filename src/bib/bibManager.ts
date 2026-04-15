@@ -64,6 +64,15 @@ export interface FileCache {
   };
 }
 
+export type TooltipCiteContext = {
+  pdfLinkOverride?: string | null;
+  zoteroAnnotation?: {
+    blockId: string;
+    page?: string;
+    openUrl?: string;
+  };
+};
+
 function getScopedSettings(file: TFile): ScopedSettings {
   const metadata = app.metadataCache.getFileCache(file);
   const output: ScopedSettings = {};
@@ -572,7 +581,11 @@ export class BibManager {
     return Array.from(doc.body.childNodes);
   }
 
-  getBibForCiteKey(file: TFile, key: string) {
+  getBibForCiteKey(
+    file: TFile,
+    key: string,
+    context?: string | TooltipCiteContext
+  ) {
     if (!this.fileCache.has(file)) {
       return null;
     }
@@ -591,7 +604,11 @@ export class BibManager {
     const el = doc.body.firstElementChild as HTMLElement;
     if (el) {
       el.dataset.citekey = key;
-      return this.prepBibHTML(el, file, true);
+      const normalized: TooltipCiteContext | undefined =
+        typeof context === 'string'
+          ? { pdfLinkOverride: context }
+          : context;
+      return this.prepBibHTML(el, file, true, normalized);
     }
     return el;
   }
@@ -812,7 +829,12 @@ export class BibManager {
     }
   }
 
-  prepBibHTML(parsed: HTMLElement, file: TFile, inTooltip?: boolean) {
+  prepBibHTML(
+    parsed: HTMLElement,
+    file: TFile,
+    inTooltip?: boolean,
+    tooltipContext?: TooltipCiteContext
+  ) {
     if (this.plugin.settings.hideLinks) {
       parsed?.findAll('a').forEach((l) => {
         l.setAttribute('aria-label', l.innerText);
@@ -853,7 +875,11 @@ export class BibManager {
           return null;
         })();
 
-        const pdfLinks = citePdfLink ? [citePdfLink] : zPDFLinks;
+        const pdfLinks = tooltipContext?.pdfLinkOverride
+          ? [tooltipContext.pdfLinkOverride]
+          : citePdfLink
+            ? [citePdfLink]
+            : zPDFLinks;
         let linkText = '@' + e.dataset.citekey;
         let linkDest = app.metadataCache.getFirstLinkpathDest(
           linkText,
@@ -888,6 +914,32 @@ export class BibManager {
                 activeWindow.open(zLink, '_blank');
               });
             });
+
+            const anno = tooltipContext?.zoteroAnnotation;
+            if (inTooltip && anno?.blockId) {
+              let openUrl = anno.openUrl;
+
+              if (!openUrl && zLink.startsWith('zotero://select/')) {
+                const openBase = zLink.replace(
+                  /^zotero:\/\/select\//,
+                  'zotero://open-pdf/'
+                );
+                const params = new URLSearchParams();
+                if (anno.page) params.set('page', anno.page);
+                params.set('annotation', anno.blockId);
+                openUrl = `${openBase}?${params.toString()}`;
+              }
+
+              if (openUrl) {
+                div.createDiv('clickable-icon', (div) => {
+                  setIcon(div, 'lucide-file-text');
+                  div.setAttr('aria-label', t('Open in Zotero'));
+                  div.onClickEvent(() => {
+                    activeWindow.open(openUrl, '_blank');
+                  });
+                });
+              }
+            }
           }
           if (pdfLinks?.length) {
             pdfLinks.forEach((link) => {

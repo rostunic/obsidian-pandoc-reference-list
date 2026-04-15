@@ -1,8 +1,9 @@
-import { TFile } from 'obsidian';
+import { MarkdownRenderer, TFile } from 'obsidian';
 
 import { t } from './lang/helpers';
 import ReferenceList from './main';
 import clip from 'text-clipper';
+import type { TooltipCiteContext } from './bib/bibManager';
 
 export class TooltipManager {
   plugin: ReferenceList;
@@ -16,7 +17,87 @@ export class TooltipManager {
     plugin.register(() => this.hideTooltip());
   }
 
-  showTooltip(el: HTMLSpanElement) {
+  private getClosestAnchorBestHref(el: HTMLElement): string | null {
+    const a = el.closest('a');
+    if (!a) return null;
+    const dataHref = a.getAttribute('data-href')?.trim();
+    const href = a.getAttribute('href')?.trim();
+    const best = href && href.includes('#') ? href : dataHref || href;
+    return best?.trim() || null;
+  }
+
+  private extractBlockIdFromTarget(target: string | null): string | null {
+    if (!target) return null;
+    const m = /#\^([^?#\s]+)/.exec(target);
+    return m?.[1] || null;
+  }
+
+  private async getBlockText(file: TFile, blockId: string): Promise<string | null> {
+    try {
+      const cache = app.metadataCache.getFileCache(file) as any;
+      const block = cache?.blocks?.[blockId];
+      const content = await app.vault.cachedRead(file);
+
+      if (block?.position?.start?.line !== undefined && block?.position?.end?.line !== undefined) {
+        const lines = content.split(/\r?\n/);
+        const startLine = Math.max(0, block.position.start.line);
+        const endLine = Math.min(lines.length - 1, block.position.end.line);
+        const slice = lines.slice(startLine, endLine + 1).join('\n');
+        return slice.replace(new RegExp(`\\s*\\^${blockId}\\b`, 'g'), '').trim() || null;
+      }
+
+      // Fallback: try to find the block id on a line
+      const re = new RegExp(`\\^${blockId}\\b`);
+      const line = content.split(/\r?\n/).find((l) => re.test(l));
+      return line?.replace(re, '').trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private extractPageFromBlockText(blockText: string | null): string | undefined {
+    if (!blockText) return undefined;
+
+    const explicit = /\bpage\s*=\s*([^\s&]+)/i.exec(blockText);
+    if (explicit?.[1]) return explicit[1];
+
+    const implicit = /\bp\.?\s*([ivxlcdm]+|\d+)\b/i.exec(blockText);
+    if (implicit?.[1]) return implicit[1];
+
+    return undefined;
+  }
+
+  private extractZoteroOpenPdfUrlFromBlockText(
+    blockText: string | null,
+    blockId: string,
+    fallbackPage?: string
+  ): string | undefined {
+    if (!blockText) return undefined;
+
+    // Prefer an explicit zotero://open-pdf/... link if present in the block.
+    const raw = /zotero:\/\/open-pdf\/[\w\/-]+(?:\?[^\s)"']*)?/i.exec(blockText)?.[0];
+    if (raw) {
+      const [base, query] = raw.split('?');
+      const params = new URLSearchParams(query || '');
+      if (fallbackPage && !params.get('page')) params.set('page', fallbackPage);
+      params.set('annotation', blockId);
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    }
+
+    // Fallback: try to derive Zotero item key from a Storage path.
+    const storageKey = /\/Storage\/([A-Z0-9]{8})\//.exec(blockText)?.[1];
+    if (storageKey) {
+      const params = new URLSearchParams();
+      if (fallbackPage) params.set('page', fallbackPage);
+      params.set('annotation', blockId);
+      return `zotero://open-pdf/library/items/${storageKey}?${params.toString()}`;
+    }
+
+    return undefined;
+  }
+
+  async showTooltip(el: HTMLSpanElement) {
     if (this.tooltip) {
       this.hideTooltip();
     }
@@ -24,7 +105,7 @@ export class TooltipManager {
     if (!el.dataset.source) return;
 
     const file = app.vault.getAbstractFileByPath(el.dataset.source);
-    if (!file && !(file instanceof TFile)) {
+    if (!(file instanceof TFile)) {
       return;
     }
 
@@ -38,11 +119,7 @@ export class TooltipManager {
         return el.dataset.pwcPdfLink;
       }
 
-      const a = el.closest('a');
-      if (!a) return null;
-      const dataHref = a.getAttribute('data-href')?.trim();
-      const href = a.getAttribute('href')?.trim();
-      const best = href && href.includes('#') ? href : dataHref || href;
+      const best = this.getClosestAnchorBestHref(el);
       if (!best) return null;
       const trimmed = best.trim();
       const noParams = trimmed.split(/[?#]/)[0];
@@ -53,6 +130,69 @@ export class TooltipManager {
         return trimmed;
       }
     })();
+
+    const mdLinkTarget = (() => {
+      const fromDataset = el.dataset.pwcMdLink?.trim();
+      if (fromDataset) return fromDataset;
+
+      const best = this.getClosestAnchorBestHref(el);
+      if (!best) return null;
+      const trimmed = best.trim();
+      const noParams = trimmed.split(/[?#]/)[0];
+      if (!noParams.toLowerCase().endsWith('.md')) return null;
+      return trimmed;
+    })();
+
+    const blockId =
+      el.dataset.pwcBlockId?.trim() || this.extractBlockIdFromTarget(mdLinkTarget);
+
+    const shouldUseAnnotationContext =
+      !!blockId &&
+      keys.length === 1 &&
+      !!mdLinkTarget &&
+      mdLinkTarget.toLowerCase().includes(keys[0].toLowerCase());
+
+    let blockText: string | null = null;
+    let annotationPage: string | undefined = undefined;
+    let annotationOpenUrl: string | undefined = undefined;
+
+    if (shouldUseAnnotationContext) {
+      const blockIdStr = blockId as string;
+      const mdLinkPath = mdLinkTarget.split(/[?#]/)[0].split('#')[0];
+      let linkDest =
+        app.metadataCache.getFirstLinkpathDest(mdLinkPath, file.path) ||
+        app.vault.getAbstractFileByPath(mdLinkPath);
+
+      if (!(linkDest instanceof TFile) && mdLinkPath.toLowerCase().endsWith('.md')) {
+        const withoutExt = mdLinkPath.slice(0, -3);
+        linkDest =
+          app.metadataCache.getFirstLinkpathDest(withoutExt, file.path) ||
+          app.vault.getAbstractFileByPath(withoutExt);
+      }
+
+      if (linkDest instanceof TFile) {
+        blockText = await this.getBlockText(linkDest, blockIdStr);
+        annotationPage = this.extractPageFromBlockText(blockText);
+        annotationOpenUrl = this.extractZoteroOpenPdfUrlFromBlockText(
+          blockText,
+          blockIdStr,
+          annotationPage
+        );
+      }
+    }
+
+    const tooltipContext: TooltipCiteContext = {
+      pdfLinkOverride,
+      ...(shouldUseAnnotationContext
+        ? {
+            zoteroAnnotation: {
+              blockId: blockId as string,
+              page: annotationPage,
+              openUrl: annotationOpenUrl,
+            },
+          }
+        : {}),
+    };
 
     let content: DocumentFragment | HTMLElement = null;
 
@@ -68,7 +208,7 @@ export class TooltipManager {
         const html = this.plugin.bibManager.getBibForCiteKey(
           file as TFile,
           key,
-          pdfLinkOverride
+          tooltipContext
         ) as HTMLElement;
 
         if (html) {
@@ -99,6 +239,11 @@ export class TooltipManager {
 
     if (this.plugin.settings.hideLinks) {
       tooltip.addClass('collapsed-links');
+    }
+
+    if (blockText) {
+      const block = tooltip.createDiv({ cls: 'pwc-block-preview' });
+      await MarkdownRenderer.renderMarkdown(blockText, block, file.path, this.plugin);
     }
 
     if (content) {
