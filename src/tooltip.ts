@@ -97,6 +97,28 @@ export class TooltipManager {
     return undefined;
   }
 
+  private extractFirstPdfLinkFromBlockText(blockText: string | null): string | null {
+    if (!blockText) return null;
+
+    const candidates = [
+      /!\[[^\]]*\]\(([^)]+)\)/.exec(blockText)?.[1],
+      /\[[^\]]*\]\(([^)]+)\)/.exec(blockText)?.[1],
+    ].filter(Boolean) as string[];
+
+    for (const c of candidates) {
+      const trimmed = c.trim();
+      const noParams = trimmed.split(/[?#]/)[0];
+      if (!noParams.toLowerCase().endsWith('.pdf')) continue;
+      try {
+        return decodeURI(trimmed);
+      } catch {
+        return trimmed;
+      }
+    }
+
+    return null;
+  }
+
   async showTooltip(el: HTMLSpanElement) {
     if (this.tooltip) {
       this.hideTooltip();
@@ -114,7 +136,7 @@ export class TooltipManager {
 
     const keys = el.dataset.citekey.split('|');
 
-    const pdfLinkOverride = (() => {
+    let pdfLinkOverride = (() => {
       if (el.dataset.pwcPdfLink) {
         return el.dataset.pwcPdfLink;
       }
@@ -155,6 +177,7 @@ export class TooltipManager {
     let blockText: string | null = null;
     let annotationPage: string | undefined = undefined;
     let annotationOpenUrl: string | undefined = undefined;
+    let pdfLinkSourcePath: string | undefined = undefined;
 
     if (shouldUseAnnotationContext) {
       const blockIdStr = blockId as string;
@@ -178,11 +201,18 @@ export class TooltipManager {
           blockIdStr,
           annotationPage
         );
+
+        const blockPdf = this.extractFirstPdfLinkFromBlockText(blockText);
+        if (blockPdf && !pdfLinkOverride) {
+          pdfLinkOverride = blockPdf;
+          pdfLinkSourcePath = linkDest.path;
+        }
       }
     }
 
     const tooltipContext: TooltipCiteContext = {
       pdfLinkOverride,
+      pdfLinkSourcePath,
       ...(shouldUseAnnotationContext
         ? {
             zoteroAnnotation: {

@@ -66,6 +66,7 @@ export interface FileCache {
 
 export type TooltipCiteContext = {
   pdfLinkOverride?: string | null;
+  pdfLinkSourcePath?: string;
   zoteroAnnotation?: {
     blockId: string;
     page?: string;
@@ -914,31 +915,31 @@ export class BibManager {
                 activeWindow.open(zLink, '_blank');
               });
             });
+          }
 
-            const anno = tooltipContext?.zoteroAnnotation;
-            if (inTooltip && anno?.blockId) {
-              let openUrl = anno.openUrl;
+          const anno = tooltipContext?.zoteroAnnotation;
+          if (inTooltip && anno?.blockId) {
+            let openUrl = anno.openUrl;
 
-              if (!openUrl && zLink.startsWith('zotero://select/')) {
-                const openBase = zLink.replace(
-                  /^zotero:\/\/select\//,
-                  'zotero://open-pdf/'
-                );
-                const params = new URLSearchParams();
-                if (anno.page) params.set('page', anno.page);
-                params.set('annotation', anno.blockId);
-                openUrl = `${openBase}?${params.toString()}`;
-              }
+            if (!openUrl && zLink?.startsWith('zotero://select/')) {
+              const openBase = zLink.replace(
+                /^zotero:\/\/select\//,
+                'zotero://open-pdf/'
+              );
+              const params = new URLSearchParams();
+              if (anno.page) params.set('page', anno.page);
+              params.set('annotation', anno.blockId);
+              openUrl = `${openBase}?${params.toString()}`;
+            }
 
-              if (openUrl) {
-                div.createDiv('clickable-icon', (div) => {
-                  setIcon(div, 'lucide-file-text');
-                  div.setAttr('aria-label', t('Open in Zotero'));
-                  div.onClickEvent(() => {
-                    activeWindow.open(openUrl, '_blank');
-                  });
+            if (openUrl) {
+              div.createDiv('clickable-icon', (div) => {
+                setIcon(div, 'lucide-file-text');
+                div.setAttr('aria-label', t('Open in Zotero'));
+                div.onClickEvent(() => {
+                  activeWindow.open(openUrl, '_blank');
                 });
-              }
+              });
             }
           }
           if (pdfLinks?.length) {
@@ -974,6 +975,18 @@ export class BibManager {
                 setIcon(div, 'lucide-book-open');
                 div.setAttr('aria-label', t('Open PDF in Obsidian tab') + ': ' + linkLabel);
                 div.onClickEvent(async () => {
+                  // If the tooltip provided an explicit link target (often coming from a
+                  // referenced markdown block), open it directly so relative paths like
+                  // ../Storage/... resolve against that source file.
+                  if (tooltipContext?.pdfLinkOverride) {
+                    const sourcePath = tooltipContext.pdfLinkSourcePath || file.path;
+                    await app.workspace.openLinkText(
+                      tooltipContext.pdfLinkOverride,
+                      sourcePath
+                    );
+                    return;
+                  }
+
                   const vaultRoot = (app.vault.adapter as any).getBasePath?.() || '';
 
                   // Prefer opening via link text so #page=... is preserved.
