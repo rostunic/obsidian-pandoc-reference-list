@@ -7,10 +7,10 @@ import type { TooltipCiteContext } from './bib/bibManager';
 
 export class TooltipManager {
   plugin: ReferenceList;
-  tooltip: HTMLDivElement;
+  tooltip: HTMLDivElement | null = null;
   isHoveringTooltip = false;
   isScrollBound = false;
-  activeEditorKey: string = null;
+  activeEditorKey: string | null = null;
 
   constructor(plugin: ReferenceList) {
     this.plugin = plugin;
@@ -75,7 +75,7 @@ export class TooltipManager {
     if (!blockText) return undefined;
 
     // Prefer an explicit zotero://open-pdf/... link if present in the block.
-    const raw = /zotero:\/\/open-pdf\/[\w\/-]+(?:\?[^\s)"']*)?/i.exec(blockText)?.[0];
+    const raw = /zotero:\/\/open-pdf\/[\w/-]+(?:\?[^\s)"']*)?/i.exec(blockText)?.[0];
     if (raw) {
       const [base, query] = raw.split('?');
       const params = new URLSearchParams(query || '');
@@ -124,7 +124,7 @@ export class TooltipManager {
       this.hideTooltip();
     }
 
-    if (!el.dataset.source) return;
+    if (!el.dataset.source || !el.dataset.citekey) return;
 
     const file = app.vault.getAbstractFileByPath(el.dataset.source);
     if (!(file instanceof TFile)) {
@@ -215,25 +215,27 @@ export class TooltipManager {
       pdfLinkSourcePath,
       ...(shouldUseAnnotationContext
         ? {
-            zoteroAnnotation: {
-              blockId: blockId as string,
-              page: annotationPage,
-              openUrl: annotationOpenUrl,
-            },
-          }
+          zoteroAnnotation: {
+            blockId: blockId as string,
+            page: annotationPage,
+            openUrl: annotationOpenUrl,
+          },
+        }
         : {}),
     };
 
-    let content: DocumentFragment | HTMLElement = null;
-
-    if (el.dataset.noteIndex) {
-      content = createDiv();
-      const html = this.plugin.bibManager.getNoteForNoteIndex(
-        file as TFile,
-        el.dataset.noteIndex
-      );
-      content.append(...html);
-    } else {
+    const getContent = () => {
+      if (el.dataset.noteIndex) {
+        const content = createDiv();
+        const html = this.plugin.bibManager.getNoteForNoteIndex(
+          file as TFile,
+          el.dataset.noteIndex
+        );
+        if (html)
+          content.append(...html);
+        return content;
+      }
+      let content: DocumentFragment | HTMLElement | null = null;
       for (const key of keys) {
         const html = this.plugin.bibManager.getBibForCiteKey(
           file as TFile,
@@ -254,7 +256,9 @@ export class TooltipManager {
           content.append(html);
         }
       }
+      return content;
     }
+    const content: DocumentFragment | HTMLElement | null = getContent();
 
     const modClasses = this.plugin.settings.hideLinks ? ' collapsed-links' : '';
     const tooltip = (this.tooltip = el.doc.body.createDiv({
@@ -292,7 +296,7 @@ export class TooltipManager {
       this.isHoveringTooltip = false;
     });
     tooltip.addEventListener('click', (evt) => {
-      if (evt.targetNode.instanceOf(HTMLElement)) {
+      if (evt.targetNode?.instanceOf(HTMLElement)) {
         if (
           evt.targetNode.tagName === 'A' ||
           evt.targetNode.hasClass('clickable-icon')
@@ -304,6 +308,7 @@ export class TooltipManager {
 
     el.win.setTimeout(() => {
       const viewport = el.win.visualViewport;
+      if (!viewport) return;
       const divRect = tooltip.getBoundingClientRect();
 
       tooltip.style.left =
@@ -325,13 +330,15 @@ export class TooltipManager {
     el.win.addEventListener('scroll', this.boundScroll, { capture: true });
   }
 
-  boundScroll: () => void;
+  boundScroll: (() => void) | null = null;
 
   hideTooltip() {
     this.isHoveringTooltip = false;
     this.isScrollBound = false;
     this.activeEditorKey = null;
-    this.tooltip?.win.removeEventListener('scroll', this.boundScroll);
+    if (this.boundScroll && this.tooltip?.win) {
+      this.tooltip.win.removeEventListener('scroll', this.boundScroll);
+    }
     this.tooltip?.remove();
     this.tooltip = null;
     this.boundScroll = null;
@@ -341,6 +348,7 @@ export class TooltipManager {
   previewDBTimerClose = 0;
   bindPreviewTooltipHandler(el: HTMLElement) {
     el.addEventListener('pointerover', (evt) => {
+      if (!evt.view) return;
       evt.view.clearTimeout(this.previewDBTimer);
       evt.view.clearTimeout(this.previewDBTimerClose);
       this.previewDBTimer = evt.view.setTimeout(() => {
@@ -349,6 +357,7 @@ export class TooltipManager {
     });
 
     el.addEventListener('pointerout', (evt) => {
+      if (!evt.view) return;
       evt.view.clearTimeout(this.previewDBTimer);
       if (!this.tooltip) return;
       this.previewDBTimerClose = evt.view.setTimeout(() => {
@@ -365,10 +374,13 @@ export class TooltipManager {
     if (this.isHoveringTooltip) {
       const { tooltip } = this;
       const outhandler = (evt: PointerEvent) => {
+        if (!evt.view) return;
         evt.view.clearTimeout(this.previewDBTimerClose);
         this.previewDBTimerClose = evt.view.setTimeout(() => {
-          tooltip.removeEventListener('pointerout', outhandler);
-          tooltip.removeEventListener('pointerenter', outhandler);
+          if (tooltip) {
+            tooltip.removeEventListener('pointerout', outhandler);
+            tooltip.removeEventListener('pointerenter', outhandler);
+          }
           if (this.isHoveringTooltip) {
             this.handleToolipHover();
           } else {
@@ -377,8 +389,10 @@ export class TooltipManager {
         }, 150);
       };
       const enterHandler = (evt: PointerEvent) => {
+        if (!evt.view) return;
         evt.view.clearTimeout(this.previewDBTimerClose);
       };
+      if (!tooltip) return;
       tooltip.addEventListener('pointerout', outhandler);
       tooltip.addEventListener('pointerenter', enterHandler);
     }
@@ -399,7 +413,8 @@ export class TooltipManager {
       },
       pointerover: (evt: PointerEvent) => {
         const target = evt.targetNode;
-        if (target.instanceOf(HTMLElement)) {
+        if(!evt.view) return;
+        if (target?.instanceOf(HTMLElement)) {
           const citekey = target.dataset.citekey;
           if (citekey) {
             evt.view.clearTimeout(dbOutTimer);
